@@ -345,3 +345,59 @@ test_scored %>%
       ifelse(glm_unbal<0, "Delayed", "Not Delayed"))) %>% 
   accuracy(was_delayed, glm_unbal_class)
 ```
+
+### A glmnet for feature selection
+Use regularization to smooth results by modifying coefficients of variables. 
+```{r}
+library(glmnetUtils)
+
+glmnet_unbal<- glmnet(was_delayed~., 
+                      train_prep1, 
+                      family="binomial",
+                      alpha=0.5, 
+                      intercept=FALSE)
+glmnet_unbal
+```
+
+```{r}
+glance(glmnet_unbal)
+```
+
+How many variables in the model at different levels of regularization?
+```{r}
+plot(glmnet_unbal, label = TRUE)
+```
+
+What level of variance if explained at each step?
+```{r}
+set.seed(1050104)
+glmnet_unbal_cv<-cv.glmnet(was_delayed~., 
+                      train_prep1, 
+                      family="binomial",
+                      alpha=0.5)
+```
+
+How do different weights perform?
+
+```{r}
+plot(glmnet_unbal_cv)
+```
+
+
+```{r}
+coef(glmnet_unbal_cv, s = "lambda.min")
+```
+#### Prep and score test data
+```{r}
+test_scored$glmnet_unbal_cv<-as.vector(predict(glmnet_unbal_cv,
+                                      test_scored,
+                                      na.action = na.pass ))
+
+```
+
+```{r}
+test_scored %>% 
+  ggplot(aes(x=glmnet_unbal_cv, group=was_delayed, fill=was_delayed)) +
+  geom_density(alpha=.5) +
+  geom_vline(aes(xintercept=0))
+```
