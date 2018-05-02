@@ -244,7 +244,7 @@ Now we need to process our numeric variables.
 colscleaned_fe  %>% 
   step_log(distance) %>% 
   step_num2factor(month, week, hour) %>% 
-  step_rm(tailnum) -> #hack!
+  step_rm(tailnum, dest) -> #hack!
   numscleaned_fe
 
 numscleaned_fe <- prep(numscleaned_fe, verbose = TRUE)
@@ -267,11 +267,81 @@ numscleaned_fe %>%
 
 
 
+## Building models
+Decide which types of models you want to consider -- perhaps using Microsoft's lovely [cheat sheet](https://docs.microsoft.com/en-gb/azure/machine-learning/studio/algorithm-cheat-sheet). Then determine if any need any special processing to the data beyond what you've done so far.
 
 
+### A basic logistic regression
+
+We can use generalised linear model functionality to construct a logistic regression.
+
+```{r}
+glm_unbal<- glm(was_delayed ~ . -1 , "binomial", data = train_prep1)
+glm_bal  <- glm(was_delayed ~ . -1 , "binomial", data = train_prep2)
+```
+
+Then we can see how these models are constructed and how they perform.
+
+```{r}
+glm_unbal
+```
+
+Fit measures on our *training* data
+```{r}
+library(broom)
+glance(glm_unbal)
+```
+
+Get the coefficients
+```{r}
+tidy(glm_unbal)
+```
+
+Get the fitted data
+```{r}
+head(augment(glm_unbal))
+```
+
+Plot predicted's vs actuals
+
+```{r}
+glm_unbal %>% 
+  augment() %>% 
+  ggplot(aes(x=.fitted, group=was_delayed, fill=was_delayed)) +
+  geom_density(alpha=.5) +
+  geom_vline(aes(xintercept=0))
+```
+
+#### Prep and predict on test data
+```{r}
+test_raw %>% 
+  bake(numscleaned_fe, .) %>% 
+  modelr::add_predictions(glm_unbal,var = "glm_unbal")  ->
+  test_scored
+```
 
 
+```{r}
+test_scored %>% 
+  ggplot(aes(x=glm_unbal, group=was_delayed, fill=was_delayed)) +
+  geom_density(alpha=.5) +
+  geom_vline(aes(xintercept=0))
+```
+
+But how many did we get right etc?
+
+```{r}
+library(yardstick)
+test_scored %>% 
+  mutate(glm_unbal_class=as.factor(
+      ifelse(glm_unbal<0, "Delayed", "Not Delayed"))) %>% 
+  conf_mat(was_delayed, glm_unbal_class)
+```
 
 
-
-    
+```{r}
+test_scored %>% 
+  mutate(glm_unbal_class=as.factor(
+      ifelse(glm_unbal<0, "Delayed", "Not Delayed"))) %>% 
+  accuracy(was_delayed, glm_unbal_class)
+```

@@ -382,7 +382,7 @@ colscleaned_fe
     ##    outcome          1
     ##  predictor         20
     ## 
-    ## Training data contained 235743 data points and 6632 incomplete rows. 
+    ## Training data contained 235743 data points and 6599 incomplete rows. 
     ## 
     ## Operations:
     ## 
@@ -403,7 +403,7 @@ Now we need to process our numeric variables.
 colscleaned_fe  %>% 
   step_log(distance) %>% 
   step_num2factor(month, week, hour) %>% 
-  step_rm(tailnum) -> #hack!
+  step_rm(tailnum, dest) -> #hack!
   numscleaned_fe
 
 numscleaned_fe <- prep(numscleaned_fe, verbose = TRUE)
@@ -431,7 +431,7 @@ numscleaned_fe
     ##    outcome          1
     ##  predictor         20
     ## 
-    ## Training data contained 235743 data points and 6632 incomplete rows. 
+    ## Training data contained 235743 data points and 6599 incomplete rows. 
     ## 
     ## Operations:
     ## 
@@ -443,7 +443,7 @@ numscleaned_fe
     ## Collapsing factor levels for carrier, origin, dest, was_delayed [trained]
     ## Log transformation on distance [trained]
     ## Factor variables from month, week, hour [trained]
-    ## Variables removed tailnum [trained]
+    ## Variables removed tailnum, dest [trained]
 
 ``` r
 train_prep1<-bake(numscleaned_fe, train_raw)
@@ -460,3 +460,198 @@ numscleaned_fe %>%
   bake(numscleaned_fe, .) ->
   train_prep2
 ```
+
+Building models
+---------------
+
+Decide which types of models you want to consider -- perhaps using Microsoft's lovely [cheat sheet](https://docs.microsoft.com/en-gb/azure/machine-learning/studio/algorithm-cheat-sheet). Then determine if any need any special processing to the data beyond what you've done so far.
+
+### A basic logistic regression
+
+We can use generalised linear model functionality to construct a logistic regression.
+
+``` r
+glm_unbal<- glm(was_delayed ~ . -1 , "binomial", data = train_prep1)
+glm_bal  <- glm(was_delayed ~ . -1 , "binomial", data = train_prep2)
+```
+
+Then we can see how these models are constructed and how they perform.
+
+``` r
+glm_unbal
+```
+
+    ## 
+    ## Call:  glm(formula = was_delayed ~ . - 1, family = "binomial", data = train_prep1)
+    ## 
+    ## Coefficients:
+    ##    month1    month10    month11    month12     month2     month3  
+    ##   1.84970    2.21598    2.18136    1.36252    1.82903    1.94208  
+    ##    month4     month5     month6     month7     month8     month9  
+    ##   1.66679    2.03914    1.62157    1.55809    1.87549    2.62006  
+    ## carrierAA  carrierB6  carrierDL  carrierEV  carrierMQ  carrierUA  
+    ##   0.28168   -0.17574    0.32667   -0.39089   -0.27171    0.15833  
+    ## carrierUS  carrierWN  originJFK  originLGA   distance     hour11  
+    ##   0.08256   -0.17747    0.12322    0.01841   -0.10739   -0.00600  
+    ##    hour12     hour13     hour14     hour15     hour16     hour17  
+    ##  -0.14352   -0.22332   -0.39486   -0.59240   -0.56685   -0.70574  
+    ##    hour18     hour19     hour20     hour21     hour22     hour23  
+    ##  -0.73363   -0.75659   -0.68971   -0.73143   -0.59814   -0.42021  
+    ##     hour5      hour6      hour7      hour8      hour9      week1  
+    ##   0.44658    0.41576    0.37990    0.10514    0.05843   -0.43163  
+    ##     week2      week3  
+    ##  -0.16862   -0.22387  
+    ## 
+    ## Degrees of Freedom: 221765 Total (i.e. Null);  221721 Residual
+    ##   (7379 observations deleted due to missingness)
+    ## Null Deviance:       307400 
+    ## Residual Deviance: 267600    AIC: 267700
+
+Fit measures on our *training* data
+
+``` r
+library(broom)
+glance(glm_unbal)
+```
+
+    ##   null.deviance df.null    logLik      AIC      BIC deviance df.residual
+    ## 1      307431.6  221765 -133784.8 267657.7 268111.3 267569.7      221721
+
+Get the coefficients
+
+``` r
+tidy(glm_unbal)
+```
+
+    ##         term     estimate   std.error   statistic       p.value
+    ## 1     month1  1.849699189 0.059380343  31.1500252 5.068044e-213
+    ## 2    month10  2.215979570 0.059965637  36.9541574 6.245544e-299
+    ## 3    month11  2.181359326 0.060067287  36.3152629 9.291910e-289
+    ## 4    month12  1.362518977 0.059528267  22.8886049 6.034077e-116
+    ## 5     month2  1.829034157 0.059618121  30.6791646 1.079530e-206
+    ## 6     month3  1.942083476 0.059594043  32.5885507 5.958489e-233
+    ## 7     month4  1.666792196 0.059460029  28.0321459 6.594316e-173
+    ## 8     month5  2.039143296 0.059687502  34.1636561 8.383578e-256
+    ## 9     month6  1.621569766 0.059559061  27.2262478 3.176462e-163
+    ## 10    month7  1.558089237 0.059506740  26.1834078 4.106439e-151
+    ## 11    month8  1.875486283 0.059634318  31.4497815 4.226593e-217
+    ## 12    month9  2.620062163 0.060763764  43.1188259  0.000000e+00
+    ## 13 carrierAA  0.281680707 0.027162837  10.3700769  3.392518e-25
+    ## 14 carrierB6 -0.175736079 0.023872939  -7.3613090  1.821154e-13
+    ## 15 carrierDL  0.326665970 0.025272978  12.9255037  3.231731e-38
+    ## 16 carrierEV -0.390886925 0.025915724 -15.0830021  2.095213e-51
+    ## 17 carrierMQ -0.271712679 0.026707134 -10.1737863  2.596162e-24
+    ## 18 carrierUA  0.158328682 0.027052122   5.8527268  4.835780e-09
+    ## 19 carrierUS  0.082560502 0.029177457   2.8295989  4.660639e-03
+    ## 20 carrierWN -0.177474196 0.033482186  -5.3005557  1.154507e-07
+    ## 21 originJFK  0.123218702 0.015804737   7.7963147  6.374132e-15
+    ## 22 originLGA  0.018413466 0.014299120   1.2877342  1.978385e-01
+    ## 23  distance -0.107392318 0.007550445 -14.2233104  6.567135e-46
+    ## 24    hour11 -0.005999922 0.031206673  -0.1922641  8.475354e-01
+    ## 25    hour12 -0.143516107 0.029769114  -4.8209735  1.428594e-06
+    ## 26    hour13 -0.223315006 0.029233663  -7.6389676  2.189705e-14
+    ## 27    hour14 -0.394862809 0.028339123 -13.9334871  3.965136e-44
+    ## 28    hour15 -0.592400092 0.027462471 -21.5712597 3.344611e-103
+    ## 29    hour16 -0.566853689 0.028010645 -20.2370808  4.617200e-91
+    ## 30    hour17 -0.705738121 0.027584043 -25.5850138 2.239980e-144
+    ## 31    hour18 -0.733632035 0.028222823 -25.9942826 5.746969e-149
+    ## 32    hour19 -0.756591701 0.028139604 -26.8870774 3.110391e-159
+    ## 33    hour20 -0.689707095 0.029721943 -23.2053163 4.023903e-119
+    ## 34    hour21 -0.731428319 0.032631044 -22.4151062 2.803717e-111
+    ## 35    hour22 -0.598139749 0.055553426 -10.7669282  4.931818e-27
+    ## 36    hour23 -0.420206184 0.080583310  -5.2145560  1.842580e-07
+    ## 37     hour5  0.446578769 0.072934840   6.1229828  9.183964e-10
+    ## 38     hour6  0.415759961 0.028968217  14.3522800  1.030915e-46
+    ## 39     hour7  0.379900725 0.030321063  12.5292682  5.163692e-36
+    ## 40     hour8  0.105143009 0.028020628   3.7523431  1.751895e-04
+    ## 41     hour9  0.058434497 0.029918207   1.9531417  5.080281e-02
+    ## 42     week1 -0.431626541 0.014445697 -29.8792473 3.661582e-196
+    ## 43     week2 -0.168616175 0.014534422 -11.6011611  4.065249e-31
+    ## 44     week3 -0.223874195 0.013449582 -16.6454394  3.265605e-62
+
+Get the fitted data
+
+``` r
+head(augment(glm_unbal))
+```
+
+    ##   .rownames was_delayed month carrier origin distance hour week  .fitted
+    ## 1         1     Delayed     1      UA    EWR 7.244228    5    0 1.676632
+    ## 2         2     Delayed     1      UA    LGA 7.255591    5    0 1.693825
+    ## 3         3 Not Delayed     1      B6    JFK 7.362645    5    0 1.453069
+    ## 4         4     Delayed     1      UA    EWR 6.577861    5    0 1.748195
+    ## 5         5     Delayed     1      B6    EWR 6.970730    6    0 1.341120
+    ## 6         6 Not Delayed     1      EV    LGA 5.433722    6    0 1.309446
+    ##      .se.fit     .resid         .hat   .sigma      .cooksd .std.resid
+    ## 1 0.07225035 -1.9225315 0.0006928264 1.098533 8.431909e-05 -1.9231978
+    ## 2 0.07336855 -1.9300609 0.0007060464 1.098533 8.742046e-05 -1.9307427
+    ## 3 0.07272412  0.6482909 0.0008124028 1.098539 4.324788e-06  0.6485544
+    ## 4 0.07245784 -1.9538098 0.0006630377 1.098533 8.667484e-05 -1.9544579
+    ## 5 0.03098241 -1.7739579 0.0001577533 1.098534 1.371210e-05 -1.7740978
+    ## 6 0.03085874  0.6913653 0.0001593987 1.098539 9.783304e-07  0.6914204
+
+Plot predicted's vs actuals
+
+``` r
+glm_unbal %>% 
+  augment() %>% 
+  ggplot(aes(x=.fitted, group=was_delayed, fill=was_delayed)) +
+  geom_density(alpha=.5) +
+  geom_vline(aes(xintercept=0))
+```
+
+![](README_files/figure-markdown_github/unnamed-chunk-19-1.png)
+
+#### Prep and predict on test data
+
+``` r
+test_raw %>% 
+  bake(numscleaned_fe, .) %>% 
+  modelr::add_predictions(glm_unbal,var = "glm_unbal")  ->
+  test_scored
+```
+
+``` r
+test_scored %>% 
+  ggplot(aes(x=glm_unbal, group=was_delayed, fill=was_delayed)) +
+  geom_density(alpha=.5) +
+  geom_vline(aes(xintercept=0))
+```
+
+    ## Warning: Removed 3217 rows containing non-finite values (stat_density).
+
+![](README_files/figure-markdown_github/unnamed-chunk-21-1.png)
+
+But how many did we get right etc?
+
+``` r
+library(yardstick)
+```
+
+    ## 
+    ## Attaching package: 'yardstick'
+
+    ## The following object is masked from 'package:readr':
+    ## 
+    ##     spec
+
+``` r
+test_scored %>% 
+  mutate(glm_unbal_class=as.factor(
+      ifelse(glm_unbal<0, "Delayed", "Not Delayed"))) %>% 
+  conf_mat(was_delayed, glm_unbal_class)
+```
+
+    ##              Truth
+    ## Prediction    Delayed Not Delayed
+    ##   Delayed        5629        4332
+    ##   Not Delayed   26060       58964
+
+``` r
+test_scored %>% 
+  mutate(glm_unbal_class=as.factor(
+      ifelse(glm_unbal<0, "Delayed", "Not Delayed"))) %>% 
+  accuracy(was_delayed, glm_unbal_class)
+```
+
+    ## [1] 0.6800337
