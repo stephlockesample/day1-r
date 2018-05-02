@@ -12,7 +12,7 @@ Packages we'll look at today:
 
 - odbc, readxl, readr, dbplyr for data access
 - tidyverse for data manipulation
-- DataExplorer for prodiving of our data
+- DataExplorer for providing of our data
 - modelr, rsamples for sampling
 - recipes for performing feature engineering 
 - glmnet, h2o, FFTrees for building models
@@ -20,6 +20,7 @@ Packages we'll look at today:
 - rmarkdown for documentation
 
 ## Working with databases
+We need a database connection before we can do anything with our database.
 ```{r}
 library(DBI)
 library(odbc)
@@ -38,5 +39,121 @@ con<-dbConnect(odbc(),
                pwd = pwd)
 ```
 
+
+Now that we have a DB connection, we can write SQL in a code chunk.
+```{sql connection=con}
+select top 5 * from flights
+```
+
+We can use dbplyr to construct dplyr commands that work on the DB.
+```{r}
+library(tidyverse)
+library(dbplyr)
+flights_tbl<-tbl(con, "flights")
+
+flights_tbl %>% 
+  filter(month<=6) %>% 
+  group_by(origin) %>% 
+  summarise(n = n(), 
+            mean_dist= mean(distance)) %>% 
+  show_query()
+```
+
+We can also work with tables that aren't in the default schema.
+```{r}
+purchaseorders_tbl<-tbl(con, in_schema("purchasing","purchaseorders"))
+
+purchaseorders_tbl %>% 
+  top_n(5)
+```
+
+We can use the `Id()` function from DBI to work with schema more generically within a database. This means we aren't restricted to just SELECT statements.
+
+```{r error=TRUE}
+# Create a schema to work in - errors if already exists
+dbGetQuery(con,"CREATE SCHEMA DBIexample")
+# Write some data - drop & recreate the table if it exists already
+dbWriteTable(con, "iris", iris, overwrite=TRUE) 
+# Read from newly written table
+head(dbReadTable(con, "iris"))
+# Read from a table in a schema
+head(dbReadTable(con, Id(schema="20774A",table="CustomerTransactions")))
+# If a write method is supported by the driver, this will work
+dbWriteTable(con, Id(schema="DBIexample", table="iris"), iris, overwrite=TRUE)
+```
+
+Some of our code could fail in that section so we used `error=TRUE` to be able to carry on even if some of the code errored. Great for optional code or things with bad connections.
+
+## Exploratory Data Analysis
+
+```{r eval=FALSE}
+flights_tbl %>% 
+  as_data_frame() %>% 
+  DataExplorer::GenerateReport()
+```
+
+Questions arising from the basic report:
+
+1. Why is there a day with double the number of flights?
+3. Why is there negative correlation between `flight` (flight number) and `distance`?
+4. Do we need to anything about missings or can we just remove the rows?
+
+Things to implement later in the workflow due to the EDA:
+
+1. We need to address the high correlation between time columns
+2. We need to group low frequency airline carriers
+3. Bivariate analysis
+
+### Answering our questions
+
+> Why is there a day with double the number of flights?
+
+Are there duplicate rows?
+
+```{r}
+flights_tbl %>% 
+  filter(day==15) %>% 
+  distinct() %>% 
+  summarise(n()) %>% 
+  as_data_frame() ->
+  distinct_count
+
+flights_tbl %>% 
+  filter(day==15) %>% 
+  summarise(n())%>% 
+  as_data_frame() ->
+  row_count
+
+identical(row_count, distinct_count)
+
+```
+
+
+But are the number of rows unusual?
+```{r}
+library(ggplot2)
+flights_tbl %>% 
+  group_by(day) %>% 
+  summarise(n=n(), n_unique=n_distinct(flight)) %>% 
+  as_data_frame() %>% 
+  ggplot(aes(x=day, y=n)) +
+    geom_col()
+```
+Looks like the jump in the histogram is an artifact of binning the data. d'oh!
+
+
+### Bivariate analysis
+```{r}
+flights_tbl %>% 
+  select_if(is.numeric) %>% 
+  as_data_frame() %>% 
+  gather(col, val, -dep_delay) %>% 
+  filter(col!="arr_delay",
+         dep_delay<500) %>% 
+  ggplot(aes(x=val, y=dep_delay)) +
+    geom_bin2d() +
+    facet_wrap(~col, scales = "free")+
+    scale_fill_gradientn(colours = viridisLite::viridis(256, option = "D"))
+```
 
 
