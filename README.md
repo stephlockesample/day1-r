@@ -8,7 +8,7 @@ Packages we'll look at today:
 
 -   odbc, readxl, readr, dbplyr for data access
 -   tidyverse for data manipulation
--   DataExplorer for providing of our data
+-   DataExplorer for providing automated EDA of our data
 -   modelr, rsamples for sampling
 -   recipes for performing feature engineering
 -   glmnet, h2o, FFTrees for building models
@@ -265,3 +265,198 @@ flights_tbl %>%
     ## 'from' must be a finite number
 
 ![](README_files/figure-markdown_github/unnamed-chunk-9-1.png)
+
+Sampling
+--------
+
+### Theory / Info
+
+Our options for sampling data with a large class imbalance are:
+
+-   Downsampling takes as many majority rows and there are minority rows
+    -   No overfit from individual rows
+    -   Can drastically reduce training data size
+-   Upsampling or over sampling repeats minority rows until they meet some defined class ratio
+    -   Risks overfitting
+    -   Doesn't reduce training data set
+-   Synthesising data makes extra records that are like the minority class
+    -   Doesn't reduce training set
+    -   Avoids some of the overfit risk of upsampling
+    -   Can weaken predictions if minority data is very similar to majority
+
+We need to think about whether we need to k-fold cross-validation explicitly.
+
+-   Run the same model and assess robustness of coefficients
+-   We have an algorithm that needs explicit cross validation because it doesn't do it internally
+-   When we're going to run lots of models with hyper-parameter tuning so the results are more consistent
+
+We use bootstrapping when we want to fit a single model and ensure the results are robust. This will often do many more iterations than k-fold cross validation, making it better in cases where there's relatively small amounts of data.
+
+Packages we can use for sampling include:
+
+-   modelr which facilitates basic, bootstrap, and k-fold crossvalidation strategies
+-   rsample allows us to bootstrap and perform a wide variety of crossvalidation tasks
+-   recipes allows us to upsample and downsample
+-   synthpop allows us to build synthesised samples
+
+### Practical
+
+First we need to split our data into test and train.
+
+``` r
+flights_tbl %>% 
+  as_data_frame() ->
+  flights
+
+flights %>% 
+  mutate(was_delayed= ifelse(arr_delay>5,"Delayed", "Not Delayed"),
+         week = ifelse(day %/% 7 > 3, 3, day %/% 7 )) ->
+  flights
+
+flights %>%   
+  modelr::resample_partition(c(train=0.7,test=0.3)) ->
+  splits
+
+splits %>% 
+  pluck("train") %>% 
+  as_data_frame()->
+  train_raw
+
+splits %>% 
+  pluck("test") %>% 
+  as_data_frame()->
+  test_raw
+```
+
+During the investigation, we'll look at the impact of upsampling. We'll see it in action in a bit. First prepping our basic features!
+
+``` r
+library(recipes)
+```
+
+    ## Loading required package: broom
+
+    ## 
+    ## Attaching package: 'recipes'
+
+    ## The following object is masked from 'package:stringr':
+    ## 
+    ##     fixed
+
+    ## The following object is masked from 'package:stats':
+    ## 
+    ##     step
+
+``` r
+basic_fe <- recipe(train_raw, was_delayed ~ .)
+
+basic_fe %>% 
+  step_rm(ends_with("time"), ends_with("delay"),tailnum, flight,
+          minute, time_hour, day) %>% 
+  step_naomit(all_predictors()) %>% 
+  step_naomit(all_outcomes()) %>% 
+  step_zv(all_predictors()) %>% 
+  step_nzv(all_predictors()) %>% 
+  step_other(all_nominal(),threshold = 0.03)  ->
+  colscleaned_fe
+
+colscleaned_fe <- prep(colscleaned_fe, verbose = TRUE)
+```
+
+    ## oper 1 step rm [training] 
+    ## oper 2 step naomit [training] 
+    ## oper 3 step naomit [training] 
+    ## oper 4 step zv [training] 
+    ## oper 5 step nzv [training] 
+    ## oper 6 step other [training]
+
+``` r
+colscleaned_fe
+```
+
+    ## Data Recipe
+    ## 
+    ## Inputs:
+    ## 
+    ##       role #variables
+    ##    outcome          1
+    ##  predictor         20
+    ## 
+    ## Training data contained 235743 data points and 6632 incomplete rows. 
+    ## 
+    ## Operations:
+    ## 
+    ## Variables removed dep_time, sched_dep_time, arr_time, ... [trained]
+    ## Removing rows with NA values in all_predictors()
+    ## Removing rows with NA values in all_outcomes()
+    ## Zero variance filter removed year [trained]
+    ## Sparse, unbalanced variable filter removed no terms [trained]
+    ## Collapsing factor levels for carrier, origin, dest, was_delayed [trained]
+
+``` r
+train_prep1<-bake(colscleaned_fe, train_raw)
+```
+
+Now we need to process our numeric variables.
+
+``` r
+colscleaned_fe  %>% 
+  step_log(distance) %>% 
+  step_num2factor(month, week, hour) %>% 
+  step_rm(tailnum) -> #hack!
+  numscleaned_fe
+
+numscleaned_fe <- prep(numscleaned_fe, verbose = TRUE)
+```
+
+    ## oper 1 step rm [pre-trained]
+    ## oper 2 step naomit [pre-trained]
+    ## oper 3 step naomit [pre-trained]
+    ## oper 4 step zv [pre-trained]
+    ## oper 5 step nzv [pre-trained]
+    ## oper 6 step other [pre-trained]
+    ## oper 7 step log [training] 
+    ## oper 8 step num2factor [training] 
+    ## oper 9 step rm [training]
+
+``` r
+numscleaned_fe
+```
+
+    ## Data Recipe
+    ## 
+    ## Inputs:
+    ## 
+    ##       role #variables
+    ##    outcome          1
+    ##  predictor         20
+    ## 
+    ## Training data contained 235743 data points and 6632 incomplete rows. 
+    ## 
+    ## Operations:
+    ## 
+    ## Variables removed dep_time, sched_dep_time, arr_time, ... [trained]
+    ## Removing rows with NA values in all_predictors()
+    ## Removing rows with NA values in all_outcomes()
+    ## Zero variance filter removed year [trained]
+    ## Sparse, unbalanced variable filter removed no terms [trained]
+    ## Collapsing factor levels for carrier, origin, dest, was_delayed [trained]
+    ## Log transformation on distance [trained]
+    ## Factor variables from month, week, hour [trained]
+    ## Variables removed tailnum [trained]
+
+``` r
+train_prep1<-bake(numscleaned_fe, train_raw)
+```
+
+W00t it's upsampling time!
+
+``` r
+numscleaned_fe %>% 
+  step_upsample(all_outcomes(), ratio=1) %>% 
+  prep(retain=TRUE) %>% 
+  juice() %>% 
+  # hack because juice isn't reducing the column set
+  bake(numscleaned_fe, .) ->
+  train_prep2
+```
